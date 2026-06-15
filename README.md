@@ -1,10 +1,12 @@
 # 无线汽车 OBD 仪表从机端 (STM32F4 + GC9A01 圆屏 + LVGL)
 
-本项目是基于 **STM32F401CCU6** 的无线汽车 OBD 仪表**显示从机**。它通过 **ESP-01 WiFi 模块** 接收来自 [无线 OBD 仪表主机](https://github.com/htc-01/STM32-OBD2-WiFi-Bridge)（或本地 `E:\stm32\car` 主机项目）的车辆实时数据，并在 **240×240 GC9A01 圆形液晶屏** 上以 LVGL 表盘形式展示。
+本项目是基于 **STM32F401CCU6** 的无线汽车 OBD 仪表**显示从机**。它通过 **ESP-01 WiFi 模块** 接收来自 [htc-01/STM32-OBD2-WiFi-Bridge](https://github.com/htc-01/STM32-OBD2-WiFi-Bridge) 主机的车辆实时数据，并在 **240×240 GC9A01 圆形液晶屏** 上以 LVGL 表盘形式展示。
 
 > 🚗 **系统定位**：
-> - `car` / [STM32-OBD2-WiFi-Bridge](https://github.com/htc-01/STM32-OBD2-WiFi-Bridge) → **主机**：负责 CAN/OBD2 数据采集与无线发送。
-> - `car111plus` → **从机**：负责无线接收数据并驱动圆形仪表盘显示。
+> - [STM32-OBD2-WiFi-Bridge](https://github.com/htc-01/STM32-OBD2-WiFi-Bridge) → **主机**：负责 CAN/OBD2 数据采集，通过串口/WiFi 输出文本帧。
+> - [esp-now-obd-host](https://github.com/htc-01/esp-now-obd-host) → **ESP-NOW 发送端（可选）**：把主机串口文本帧转为二进制 ESP-NOW 帧无线发送。
+> - [ESP-01S-OBD-Dashboard-Receiver](https://github.com/htc-01/ESP-01S-OBD-Dashboard-Receiver) → **ESP-NOW 接收端（可选）**：与发送端配对，把无线帧还原为串口文本帧。
+> - 本仓库 **STM32-OBD2-WiFi-Dashboard** → **显示从机**：负责无线/串口接收数据并驱动圆形仪表盘显示。
 
 ---
 
@@ -22,7 +24,7 @@
   | 空气流量 (MAF) | g/s | 洋红 | > 400 |
   | 节气门开度 (THR) | % | 橙色 | > 80 |
 
-- **无线接收数据**：通过 USART1 连接 ESP-01，接收 `[LOAD=... TMP=... RPM=... SPD=... MAF=... THR=...]` 格式数据帧。
+- **无线/串口接收数据**：通过 USART1 连接 ESP-01，接收 `[LOAD=... TMP=... RPM=... SPD=... MAF=... THR=...]` 格式数据帧。数据可来自主机 WiFi 透传，也可来自 ESP-NOW 接收端 `ESP-01S-OBD-Dashboard-Receiver`。
 - **动态表盘动画**：使用 LVGL `lv_arc` 弧形控件，数值变化时平滑刷新，减少闪烁。
 - **越限报警闪烁**：当数值超过量程上限时，屏幕红/黑闪烁提示。
 - **页面记忆功能**：当前显示的仪表页面通过 **AT24C02 EEPROM** 保存，掉电不丢失。
@@ -136,7 +138,7 @@
 
 ### 无线 / 串口输入帧格式
 
-从机端通过 USART1 接收来自主机（或 ESP-01 透传）的数据帧：
+从机端通过 USART1 接收来自主机（或 ESP-01 透传 / ESP-NOW 接收端）的数据帧：
 
 ```
 [LOAD=<负载> TMP=<温度> RPM=<转速> SPD=<车速> MAF=<空流> THR=<节气门>]
@@ -150,7 +152,7 @@
 - 帧头：`[`
 - 帧尾：`]`
 - 字段以空格分隔
-- 数据通过 **ESP-01 WiFi 透传** → USART1 → STM32F401 接收
+- 数据通过 **ESP-01 WiFi 透传** 或 **ESP-01S-OBD-Dashboard-Receiver 串口输出** → USART1 → STM32F401 接收
 
 接收代码位于 `main.c` 的 `HAL_UART_RxCpltCallback()` 与 `ParseRxData()` 中，采用中断逐字节接收，检测到 `]` 后标记数据就绪。
 
@@ -170,14 +172,14 @@
 ```bash
 # 克隆仓库
 git clone <repo-url>
-cd car111plus
+cd STM32-OBD2-WiFi-Dashboard
 
 # 配置并构建（以 GCC 为例）
 cmake --preset=default
 cmake --build build/Debug
 
 # 烧录（使用 OpenOCD 示例）
-openocd -f interface/stlink.cfg -f target/stm32f4x.cfg -c "program build/Debug/car111plus.elf verify reset exit"
+openocd -f interface/stlink.cfg -f target/stm32f4x.cfg -c "program build/Debug/STM32-OBD2-WiFi-Dashboard.elf verify reset exit"
 ```
 
 或直接在 CLion 中选择 `STM32_GCC` / `STM32_ARMClang` 预设进行构建。
@@ -186,7 +188,7 @@ openocd -f interface/stlink.cfg -f target/stm32f4x.cfg -c "program build/Debug/c
 
 1. 将 ESP-01 的 TX/RX 交叉连接到 STM32F401 的 USART1（PA10/PA9）。
 2. 上电后屏幕显示开机自检信息，随后进入主表盘。
-3. 当主机（`car` 或 [STM32-OBD2-WiFi-Bridge](https://github.com/htc-01/STM32-OBD2-WiFi-Bridge)）开始发送数据帧后，屏幕实时更新。
+3. 当主机（[STM32-OBD2-WiFi-Bridge](https://github.com/htc-01/STM32-OBD2-WiFi-Bridge)）开始发送数据帧后，屏幕实时更新。
 4. 短按按键切换仪表页面，长按按键熄屏/唤醒。
 
 ---
@@ -234,10 +236,10 @@ openocd -f interface/stlink.cfg -f target/stm32f4x.cfg -c "program build/Debug/c
 
 ## 🤝 关联项目
 
-- **主机端**：`E:\stm32\car` 或 GitHub [htc-01/STM32-OBD2-WiFi-Bridge](https://github.com/htc-01/STM32-OBD2-WiFi-Bridge)
-  - 负责连接汽车 OBD2 CAN 总线，采集发动机数据并通过 WiFi/串口发送。
-- **显示端**：`car111plus`（本项目）
-  - 负责接收数据帧并驱动 GC9A01 圆形液晶屏显示。
+- **[STM32-OBD2-WiFi-Bridge](https://github.com/htc-01/STM32-OBD2-WiFi-Bridge)**：STM32F103C8T6 主机，负责连接汽车 OBD2 CAN 总线，采集发动机数据并通过 WiFi/串口发送。
+- **[esp-now-obd-host](https://github.com/htc-01/esp-now-obd-host)**：ESP-01S 发送端固件，负责把主机串口文本帧打包为 ESP-NOW 二进制帧并无线发送。
+- **[ESP-01S-OBD-Dashboard-Receiver](https://github.com/htc-01/ESP-01S-OBD-Dashboard-Receiver)**：ESP-01S 接收端固件，与 `esp-now-obd-host` 配对，把无线帧还原为串口文本帧给本显示端。
+- **STM32-OBD2-WiFi-Dashboard（本项目）**：负责接收数据帧并驱动 GC9A01 圆形液晶屏显示。
 
 ---
 
