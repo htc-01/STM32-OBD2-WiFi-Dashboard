@@ -1,0 +1,32 @@
+# Build outputs
+build/
+cmake-build-*/
+out/
+*.elf
+*.bin
+*.hex
+*.map
+
+# IDE
+.idea/
+.vscode/
+*.user
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python / scripts
+__pycache__/
+*.pyc
+*.pyo
+
+# Debug / temporary
+*.log
+*.tmp
